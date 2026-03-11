@@ -1,0 +1,27 @@
+# Project Rules
+
+## Tech Stack
+-   **Backend (WASM)**: Rust, Candle (ML framework), wasm-bindgen.
+-   **Frontend**: Vue 3, TypeScript, Vite.
+-   **Package Manager**: pnpm.
+-   **Node Version**: 22.4.1 (managed by nvm).
+-   **Linting/Formatting**: ESLint, Prettier.
+
+## Directory Structure
+-   `/wasm`: Rust project for WASM modules.
+-   `/frontend`: Vue 3 frontend application.
+
+## Development Workflow
+1.  **WASM Changes**: When modifying Rust code in `/wasm`, always run the `build-wasm` skill or `wasm-pack build --target web --out-dir ../frontend/src/wasm-pkg`.
+2.  **Frontend Changes**: Frontend code resides in `/frontend`. Use `pnpm dev` to start the server.
+3.  **Dependencies**: Use `pnpm install` in `/frontend`.
+
+## Coding Standards
+-   **Rust**: Follow Rust idioms. Use `Result` for error handling. Ensure functions exposed to WASM are marked with `#[wasm_bindgen]`.
+-   **Vue/TS**: Use `<script setup lang="ts">`. Adhere to ESLint and Prettier configurations.
+-   **Node**: Ensure `.nvmrc` is respected (use `nvm use`).
+
+## Candle Specifics
+-   Use `candle-core` for tensor operations.
+-   Use `candle-nn` for neural network layers.
+-   Ensure models are loaded asynchronously in the frontend.

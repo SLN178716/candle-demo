@@ -1,0 +1,8 @@
+{
+  "name": "kriging-wasm",
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "cd frontend && pnpm dev",
+    "build:wasm": "wasm-pack build wasm/qwen3 --release --out-dir ../../frontend/src/wasm-pkg/qwen3 --target web"
+  }
+}

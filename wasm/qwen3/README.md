@@ -1,0 +1,1 @@
+`$env:CFLAGS = "-isystem YOUR_PATH_TO_INCLUDE"`

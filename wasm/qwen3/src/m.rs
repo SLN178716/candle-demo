@@ -1,7 +1,7 @@
-use candle::quantized::gguf_file;
-use candle::{DType, Device, Tensor};
+use candle_core::quantized::gguf_file;
+use candle_core::{DType, Device, Tensor};
 use candle_transformers::generation::LogitsProcessor;
-use candle_wasm_chat_template::{ChatTemplate, ChatTemplateOptions, Conversation, Message};
+use wasm_chat_template::{ChatTemplate, ChatTemplateOptions, Conversation, Message};
 use js_sys::Date;
 use std::io::Cursor;
 use tokenizers::Tokenizer;
@@ -507,7 +507,7 @@ You are a helpful AI assistant.",
             &mut self,
             tokens: &[u32],
             start_pos: usize,
-        ) -> candle::Result<(String, u32)> {
+        ) -> candle_core::Result<(String, u32)> {
             let _prof = ProfileGuard::new("process_prompt");
 
             let dev = Device::Cpu;
@@ -571,7 +571,7 @@ You are a helpful AI assistant.",
 
         /// 处理生成过程中的单个 token。
         /// 传入的 token 尚未在 kv_tokens 中 - 处理后会添加。
-        fn process_generation(&mut self, token_to_process: u32) -> candle::Result<String> {
+        fn process_generation(&mut self, token_to_process: u32) -> candle_core::Result<String> {
             let _prof = ProfileGuard::new("process_generation");
 
             let dev = Device::Cpu;

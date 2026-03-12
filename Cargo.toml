@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "wasm/*",
+    "wasm/chat-template",
+    "wasm/qwen3",
 ]
 resolver = "2"
 

@@ -12,5 +12,5 @@ This skill builds the Rust project in the `wasm` directory targeting the web.
 1.  Ensure you are in the project root.
 2.  Run the following command:
     ```bash
-    cd wasm && wasm-pack build --target web --out-dir ../frontend/src/wasm-pkg
+    cd wasm/qwen3 && wasm-pack build --target web --out-dir ../../frontend/src/wasm-pkg
     ```

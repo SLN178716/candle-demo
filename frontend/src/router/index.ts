@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppContainer from '../components/AppContainer.vue'
 import HomeView from '../views/HomeView.vue'
 import DashboardView from '../views/DashboardView.vue'
+import ChatView from '../views/chat/ChatView.vue'
 import NotFoundView from '../views/NotFoundView.vue'
 
 export const routes: RouteRecordRaw[] = [
@@ -24,6 +25,15 @@ export const routes: RouteRecordRaw[] = [
         component: DashboardView,
         meta: {
           title: '控制台',
+          icon: 'DataAnalysis',
+        },
+      },
+      {
+        path: 'chat',
+        name: 'chat',
+        component: ChatView,
+        meta: {
+          title: '聊天',
           icon: 'DataAnalysis',
         },
       },

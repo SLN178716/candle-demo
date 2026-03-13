@@ -1,0 +1,508 @@
+<script setup>
+import { computed, nextTick, onMounted, ref } from 'vue'
+
+const MODEL_URL = '/models/qwen3/Qwen3-0.6B-Q8_0.gguf'
+const TOKENIZER_URL = '/models/qwen3/tokenizer.json'
+const CONFIG_URL = '/models/qwen3/config.json'
+
+const statusText = ref('初始化中...')
+const statusType = ref('loading')
+const cacheInfo = ref('')
+const memoryInfo = ref('加载中...')
+
+const messages = ref([])
+const userInput = ref('')
+const enableThinking = ref(true)
+const maxTokens = ref(500)
+
+const isReady = ref(false)
+const isGenerating = ref(false)
+const shouldStopGeneration = ref(false)
+const messageIdCounter = ref(0)
+
+const chatThreadRef = ref()
+let model = null
+let wasmExports = null
+
+const canSend = computed(
+  () => isReady.value && !isGenerating.value && userInput.value.trim().length > 0,
+)
+
+const statusTagType = computed(() => {
+  if (statusType.value === 'ready') return 'success'
+  if (statusType.value === 'error') return 'danger'
+  return 'warning'
+})
+
+const showEmptyState = computed(() => messages.value.length === 0)
+
+const toErrorMessage = (error) => {
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String(error.message)
+  }
+  return String(error)
+}
+
+const setStatus = (text, type) => {
+  statusText.value = text
+  statusType.value = type
+}
+
+const scrollToBottom = async () => {
+  await nextTick()
+  const container = chatThreadRef.value
+  if (container) container.scrollTop = container.scrollHeight
+}
+
+const updateCacheInfo = () => {
+  if (!model) return
+  cacheInfo.value = `${model.get_message_count()} messages | ${model.get_cached_token_count()} tokens cached`
+}
+
+const updateMemoryInfo = () => {
+  try {
+    if (!wasmExports || !wasmExports.get_wasm_memory_info) return
+    memoryInfo.value = wasmExports.get_wasm_memory_info()
+  } catch {
+    memoryInfo.value = ''
+  }
+}
+
+const parseResponse = (fullText, thinkingEnabled) => {
+  if (!thinkingEnabled) {
+    return { thinking: '', response: cleanTokens(fullText) }
+  }
+
+  const lastThinkStart = fullText.lastIndexOf('<think>')
+  const lastThinkEnd = fullText.lastIndexOf('</think>')
+
+  if (lastThinkStart > lastThinkEnd) {
+    return { thinking: cleanTokens(fullText), response: '' }
+  }
+
+  if (lastThinkEnd !== -1) {
+    const thinkingRaw = fullText.substring(0, lastThinkEnd)
+    const responseRaw = fullText.substring(lastThinkEnd + 8)
+    return { thinking: cleanTokens(thinkingRaw), response: cleanTokens(responseRaw) }
+  }
+
+  return { thinking: cleanTokens(fullText), response: '' }
+}
+
+const cleanTokens = (text) => {
+  return text
+    .replace(/<\|im_start\|>/g, '')
+    .replace(/<\|im_end\|>/g, '')
+    .replace(/<\|endoftext\|>/g, '')
+    .replace(/<think>/g, '')
+    .replace(/<\/think>/g, '')
+    .trim()
+}
+
+const addUserMessage = (content) => {
+  messageIdCounter.value += 1
+  messages.value.push({
+    id: messageIdCounter.value,
+    role: 'user',
+    content,
+    thinking: '',
+    thinkingCollapsed: true,
+    streaming: false,
+  })
+}
+
+const addAssistantMessage = () => {
+  messageIdCounter.value += 1
+  const message = {
+    id: messageIdCounter.value,
+    role: 'assistant',
+    content: '',
+    thinking: '',
+    thinkingCollapsed: true,
+    streaming: true,
+  }
+  messages.value.push(message)
+  return message
+}
+
+const loadWasmModule = async () => {
+  const candidates = ['/src/wasm-pkg/qwen3/wasm_qwen3.js', '/wasm-pkg/qwen3/wasm_qwen3.js']
+  let lastError = null
+  for (const candidate of candidates) {
+    try {
+      return await import(/* @vite-ignore */ candidate)
+    } catch (error) {
+      lastError = error
+    }
+  }
+  throw new Error(toErrorMessage(lastError || 'WASM 模块加载失败'))
+}
+
+const loadModel = async () => {
+  try {
+    setStatus('初始化 WASM...', 'loading')
+    wasmExports = await loadWasmModule()
+    await wasmExports.default()
+
+    setStatus('加载模型文件...', 'loading')
+    const [weights, tokenizer, config] = await Promise.all([
+      fetch(MODEL_URL).then((res) => {
+        if (!res.ok) throw new Error(`模型文件加载失败: ${MODEL_URL}`)
+        return res.arrayBuffer()
+      }),
+      fetch(TOKENIZER_URL).then((res) => {
+        if (!res.ok) throw new Error(`tokenizer 加载失败: ${TOKENIZER_URL}`)
+        return res.arrayBuffer()
+      }),
+      fetch(CONFIG_URL).then((res) => {
+        if (!res.ok) throw new Error(`config 加载失败: ${CONFIG_URL}`)
+        return res.arrayBuffer()
+      }),
+    ])
+
+    setStatus('创建模型实例...', 'loading')
+    wasmExports.profile_clear?.()
+    model = new wasmExports.Model(
+      new Uint8Array(weights),
+      new Uint8Array(tokenizer),
+      new Uint8Array(config),
+    )
+    model.start_conversation(undefined, enableThinking.value)
+
+    isReady.value = true
+    setStatus('模型就绪', 'ready')
+    updateCacheInfo()
+    updateMemoryInfo()
+  } catch (error) {
+    setStatus(`初始化失败: ${toErrorMessage(error)}`, 'error')
+  }
+}
+
+const sendMessage = async () => {
+  if (!model || !canSend.value) return
+  const input = userInput.value.trim()
+  if (!input) return
+
+  userInput.value = ''
+  addUserMessage(input)
+  const assistantMessage = addAssistantMessage()
+  await scrollToBottom()
+
+  isGenerating.value = true
+  shouldStopGeneration.value = false
+
+  try {
+    setStatus('生成中...', 'loading')
+    wasmExports?.profile_clear?.()
+    const startAt = performance.now()
+    const tokenLimit = Math.max(1, Math.min(2000, maxTokens.value))
+
+    const firstToken = model.chat(
+      input,
+      0.6,
+      0.9,
+      1.1,
+      64,
+      Date.now(),
+      enableThinking.value,
+    )
+
+    let allText = firstToken
+    let tokenCount = 1
+    let parsed = parseResponse(allText, enableThinking.value)
+    assistantMessage.thinking = parsed.thinking
+    assistantMessage.content = parsed.response
+    await scrollToBottom()
+
+    for (let i = 0; i < tokenLimit - 1; i += 1) {
+      if (shouldStopGeneration.value || model.is_eos()) break
+
+      const token = model.next_token()
+      allText += token
+      tokenCount += 1
+
+      parsed = parseResponse(allText, enableThinking.value)
+      assistantMessage.thinking = parsed.thinking
+      assistantMessage.content = parsed.response
+
+      if (tokenCount % 10 === 0) {
+        const seconds = (performance.now() - startAt) / 1000
+        const speed = seconds > 0 ? (tokenCount / seconds).toFixed(1) : '0.0'
+        setStatus(`生成中... ${tokenCount} tokens (${speed} tok/s)`, 'loading')
+        updateCacheInfo()
+        await scrollToBottom()
+        await Promise.resolve()
+      }
+    }
+
+    model.end_turn()
+    assistantMessage.streaming = false
+    const totalSeconds = (performance.now() - startAt) / 1000
+    const finalSpeed = totalSeconds > 0 ? (tokenCount / totalSeconds).toFixed(1) : '0.0'
+    setStatus(`${tokenCount} tokens / ${totalSeconds.toFixed(1)}s (${finalSpeed} tok/s)`, 'ready')
+    updateCacheInfo()
+    updateMemoryInfo()
+  } catch (error) {
+    assistantMessage.streaming = false
+    assistantMessage.content = `Error: ${toErrorMessage(error)}`
+    setStatus(`生成失败: ${toErrorMessage(error)}`, 'error')
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+const stopGeneration = () => {
+  shouldStopGeneration.value = true
+}
+
+const newConversation = () => {
+  if (!model) return
+  model.start_conversation(undefined, enableThinking.value)
+  messages.value = []
+  wasmExports?.profile_clear?.()
+  updateCacheInfo()
+  setStatus('新会话已创建', 'ready')
+}
+
+const showStats = () => {
+  wasmExports?.profile_print_stats?.()
+  if (model) window.console.log('Conversation JSON:', model.get_conversation_json())
+}
+
+const onInputKeydown = (event) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    void sendMessage()
+  }
+}
+
+onMounted(() => {
+  void loadModel()
+})
+</script>
+
+<template>
+  <div class="chat-page">
+    <el-card class="header-card" shadow="never">
+      <h2>Qwen3 Chat</h2>
+      <p>基于 Candle + WebAssembly，在浏览器中运行量化 Qwen3 模型。</p>
+    </el-card>
+
+    <el-card class="panel-card" shadow="never">
+      <template #header>
+        <div class="status-bar">
+          <el-tag :type="statusTagType">{{ statusText }}</el-tag>
+          <span class="cache-info">{{ cacheInfo }}</span>
+        </div>
+      </template>
+
+      <div ref="chatThreadRef" class="chat-thread">
+        <div v-if="showEmptyState" class="empty-state">
+          <h3>开始对话</h3>
+          <p>输入问题后点击发送，模型会逐 token 生成回复。</p>
+        </div>
+
+        <div v-for="message in messages" :key="message.id" class="message" :class="message.role">
+          <template v-if="message.role === 'assistant' && message.thinking">
+            <el-button text type="primary" class="thinking-toggle" @click="message.thinkingCollapsed = !message.thinkingCollapsed">
+              {{ message.thinkingCollapsed ? '展开推理过程' : '收起推理过程' }}
+            </el-button>
+            <pre v-show="!message.thinkingCollapsed" class="thinking-content">{{ message.thinking }}</pre>
+          </template>
+
+          <pre class="message-content">{{ message.content }}</pre>
+          <span v-if="message.streaming" class="streaming-dot"></span>
+        </div>
+      </div>
+
+      <div class="input-area">
+        <el-input
+          v-model="userInput"
+          type="textarea"
+          :rows="2"
+          :autosize="{ minRows: 2, maxRows: 6 }"
+          :disabled="!isReady || isGenerating"
+          placeholder="输入消息，Enter发送，Shift+Enter换行"
+          @keydown="onInputKeydown"
+        />
+
+        <div class="options-row">
+          <el-checkbox v-model="enableThinking" :disabled="!isReady || isGenerating">Thinking mode</el-checkbox>
+          <div class="max-tokens">
+            <span>Max tokens</span>
+            <el-input-number v-model="maxTokens" :min="1" :max="2000" :step="50" :disabled="!isReady || isGenerating" />
+          </div>
+        </div>
+
+        <div class="button-row">
+          <el-button type="primary" :disabled="!canSend" @click="sendMessage">发送</el-button>
+          <el-button type="danger" :disabled="!isGenerating" @click="stopGeneration">停止</el-button>
+          <el-button :disabled="!isReady || isGenerating" @click="newConversation">新会话</el-button>
+          <el-button :disabled="!isReady || isGenerating" @click="showStats">统计</el-button>
+          <span class="memory-info">{{ memoryInfo }}</span>
+        </div>
+      </div>
+    </el-card>
+  </div>
+</template>
+
+<style scoped>
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: calc(100vh - 96px);
+}
+
+.header-card h2 {
+  margin: 0 0 6px;
+}
+
+.header-card p {
+  margin: 0;
+  color: var(--el-text-color-secondary);
+}
+
+.panel-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+:deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.status-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.cache-info {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: 'Courier New', monospace;
+}
+
+.chat-thread {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 6px 0;
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  color: var(--el-text-color-secondary);
+}
+
+.message {
+  max-width: 85%;
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.message.user {
+  align-self: flex-end;
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.message.assistant {
+  align-self: flex-start;
+  background: var(--el-fill-color-light);
+}
+
+.message-content {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  font-family: inherit;
+}
+
+.thinking-toggle {
+  margin-bottom: 6px;
+  padding: 0;
+}
+
+.thinking-content {
+  margin: 0 0 8px;
+  border-radius: 8px;
+  padding: 10px;
+  background: #e8ecff;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: 'Courier New', monospace;
+}
+
+.streaming-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 8px;
+  border-radius: 50%;
+  background: #667eea;
+  animation: pulse 1s infinite;
+}
+
+.input-area {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--el-border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.options-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.max-tokens {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.memory-info {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-family: 'Courier New', monospace;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+</style>

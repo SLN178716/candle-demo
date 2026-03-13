@@ -1,28 +1,101 @@
-<script setup>
+<script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue'
+import {
+  clearModelFileCache,
+  isModelFileCacheSupported,
+  loadModelArrayBuffer,
+} from '../../utils/modelFileCache'
 
-const MODEL_URL = '/models/qwen3/Qwen3-0.6B-Q8_0.gguf'
-const TOKENIZER_URL = '/models/qwen3/tokenizer.json'
-const CONFIG_URL = '/models/qwen3/config.json'
+type StatusType = 'loading' | 'ready' | 'error'
+
+type ModelPaths = {
+  model: string
+  tokenizer: string
+  config: string
+}
+
+type LoadSource = {
+  model: '' | 'cache' | 'network'
+  tokenizer: '' | 'cache' | 'network'
+  config: '' | 'cache' | 'network'
+}
+
+type ChatMessage = {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  thinking: string
+  thinkingCollapsed: boolean
+  streaming: boolean
+}
+
+type ParsedResponse = {
+  thinking: string
+  response: string
+}
+
+type WasmModel = {
+  get_message_count: () => number
+  get_cached_token_count: () => number
+  start_conversation: (systemPrompt?: string, enableThinking?: boolean) => void
+  chat: (
+    userMessage: string,
+    temp: number,
+    topP: number,
+    repeatPenalty: number,
+    repeatLastN: number,
+    seed: number,
+    enableThinking: boolean,
+  ) => string
+  next_token: () => string
+  is_eos: () => boolean
+  end_turn: () => void
+  get_conversation_json: () => string
+}
+
+type WasmModule = {
+  default: () => Promise<void>
+  Model: new (weights: Uint8Array, tokenizer: Uint8Array, config: Uint8Array) => WasmModel
+  profile_clear?: () => void
+  profile_print_stats?: () => void
+  get_wasm_memory_info?: () => string
+}
+
+type SavedSettings = Partial<ModelPaths> & { cacheEnabled?: boolean }
+
+const SETTINGS_KEY = 'qwen3-chat-view-settings'
+const DEFAULT_PATHS: ModelPaths = {
+  model: '/models/qwen3/Qwen3-0.6B-Q8_0.gguf',
+  tokenizer: '/models/qwen3/tokenizer.json',
+  config: '/models/qwen3/config.json',
+}
 
 const statusText = ref('初始化中...')
-const statusType = ref('loading')
+const statusType = ref<StatusType>('loading')
 const cacheInfo = ref('')
 const memoryInfo = ref('加载中...')
+const loadSource = ref<LoadSource>({
+  model: '',
+  tokenizer: '',
+  config: '',
+})
 
-const messages = ref([])
+const messages = ref<ChatMessage[]>([])
 const userInput = ref('')
 const enableThinking = ref(true)
 const maxTokens = ref(500)
+const modelPaths = ref<ModelPaths>({ ...DEFAULT_PATHS })
+const cacheSupported = ref(isModelFileCacheSupported())
+const cacheEnabled = ref(cacheSupported.value)
 
 const isReady = ref(false)
 const isGenerating = ref(false)
 const shouldStopGeneration = ref(false)
 const messageIdCounter = ref(0)
 
-const chatThreadRef = ref()
-let model = null
-let wasmExports = null
+const chatThreadRef = ref<HTMLDivElement | null>(null)
+let model: WasmModel | null = null
+let wasmExports: WasmModule | null = null
 
 const canSend = computed(
   () => isReady.value && !isGenerating.value && userInput.value.trim().length > 0,
@@ -34,16 +107,57 @@ const statusTagType = computed(() => {
   return 'warning'
 })
 
+const cacheModeText = computed(() => {
+  if (!cacheSupported.value) return '当前浏览器不支持 IndexedDB'
+  return cacheEnabled.value ? '已启用本地缓存' : '已禁用本地缓存'
+})
+
+const modelSourceText = computed(() => {
+  const source = loadSource.value
+  if (!source.model && !source.tokenizer && !source.config) return ''
+  return `model:${source.model || '-'} tokenizer:${source.tokenizer || '-'} config:${source.config || '-'}`
+})
+
 const showEmptyState = computed(() => messages.value.length === 0)
 
-const toErrorMessage = (error) => {
+const toErrorMessage = (error: unknown): string => {
   if (error && typeof error === 'object' && 'message' in error) {
-    return String(error.message)
+    return String((error as { message: unknown }).message)
   }
   return String(error)
 }
 
-const setStatus = (text, type) => {
+const readSavedSettings = () => {
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw) as SavedSettings
+    modelPaths.value = {
+      model: parsed.model || DEFAULT_PATHS.model,
+      tokenizer: parsed.tokenizer || DEFAULT_PATHS.tokenizer,
+      config: parsed.config || DEFAULT_PATHS.config,
+    }
+    if (cacheSupported.value && typeof parsed.cacheEnabled === 'boolean') {
+      cacheEnabled.value = parsed.cacheEnabled
+    }
+  } catch {
+    modelPaths.value = { ...DEFAULT_PATHS }
+  }
+}
+
+const saveSettings = () => {
+  window.localStorage.setItem(
+    SETTINGS_KEY,
+    JSON.stringify({
+      model: modelPaths.value.model,
+      tokenizer: modelPaths.value.tokenizer,
+      config: modelPaths.value.config,
+      cacheEnabled: cacheEnabled.value,
+    }),
+  )
+}
+
+const setStatus = (text: string, type: StatusType) => {
   statusText.value = text
   statusType.value = type
 }
@@ -68,7 +182,7 @@ const updateMemoryInfo = () => {
   }
 }
 
-const parseResponse = (fullText, thinkingEnabled) => {
+const parseResponse = (fullText: string, thinkingEnabled: boolean): ParsedResponse => {
   if (!thinkingEnabled) {
     return { thinking: '', response: cleanTokens(fullText) }
   }
@@ -89,7 +203,7 @@ const parseResponse = (fullText, thinkingEnabled) => {
   return { thinking: cleanTokens(fullText), response: '' }
 }
 
-const cleanTokens = (text) => {
+const cleanTokens = (text: string): string => {
   return text
     .replace(/<\|im_start\|>/g, '')
     .replace(/<\|im_end\|>/g, '')
@@ -99,7 +213,7 @@ const cleanTokens = (text) => {
     .trim()
 }
 
-const addUserMessage = (content) => {
+const addUserMessage = (content: string) => {
   messageIdCounter.value += 1
   messages.value.push({
     id: messageIdCounter.value,
@@ -111,9 +225,9 @@ const addUserMessage = (content) => {
   })
 }
 
-const addAssistantMessage = () => {
+const addAssistantMessage = (): ChatMessage => {
   messageIdCounter.value += 1
-  const message = {
+  const message: ChatMessage = {
     id: messageIdCounter.value,
     role: 'assistant',
     content: '',
@@ -125,12 +239,12 @@ const addAssistantMessage = () => {
   return message
 }
 
-const loadWasmModule = async () => {
+const loadWasmModule = async (): Promise<WasmModule> => {
   const candidates = ['/src/wasm-pkg/qwen3/wasm_qwen3.js', '/wasm-pkg/qwen3/wasm_qwen3.js']
-  let lastError = null
+  let lastError: unknown = null
   for (const candidate of candidates) {
     try {
-      return await import(/* @vite-ignore */ candidate)
+      return (await import(/* @vite-ignore */ candidate)) as WasmModule
     } catch (error) {
       lastError = error
     }
@@ -138,26 +252,28 @@ const loadWasmModule = async () => {
   throw new Error(toErrorMessage(lastError || 'WASM 模块加载失败'))
 }
 
+const loadFileByConfig = async (name: keyof LoadSource, url: string): Promise<ArrayBuffer> => {
+  const useCache = cacheSupported.value && cacheEnabled.value
+  const cacheKey = `qwen3:${name}:${url}`
+  const result = await loadModelArrayBuffer(url, cacheKey, useCache)
+  loadSource.value[name] = result.fromCache ? 'cache' : 'network'
+  return result.buffer
+}
+
 const loadModel = async () => {
   try {
+    isReady.value = false
+    model = null
+    loadSource.value = { model: '', tokenizer: '', config: '' }
     setStatus('初始化 WASM...', 'loading')
     wasmExports = await loadWasmModule()
     await wasmExports.default()
 
     setStatus('加载模型文件...', 'loading')
     const [weights, tokenizer, config] = await Promise.all([
-      fetch(MODEL_URL).then((res) => {
-        if (!res.ok) throw new Error(`模型文件加载失败: ${MODEL_URL}`)
-        return res.arrayBuffer()
-      }),
-      fetch(TOKENIZER_URL).then((res) => {
-        if (!res.ok) throw new Error(`tokenizer 加载失败: ${TOKENIZER_URL}`)
-        return res.arrayBuffer()
-      }),
-      fetch(CONFIG_URL).then((res) => {
-        if (!res.ok) throw new Error(`config 加载失败: ${CONFIG_URL}`)
-        return res.arrayBuffer()
-      }),
+      loadFileByConfig('model', modelPaths.value.model),
+      loadFileByConfig('tokenizer', modelPaths.value.tokenizer),
+      loadFileByConfig('config', modelPaths.value.config),
     ])
 
     setStatus('创建模型实例...', 'loading')
@@ -174,8 +290,24 @@ const loadModel = async () => {
     updateCacheInfo()
     updateMemoryInfo()
   } catch (error) {
+    isReady.value = false
     setStatus(`初始化失败: ${toErrorMessage(error)}`, 'error')
   }
+}
+
+const applyModelSettings = async () => {
+  if (isGenerating.value) return
+  saveSettings()
+  await loadModel()
+}
+
+const clearLocalCache = async () => {
+  if (!cacheSupported.value) {
+    setStatus('当前浏览器不支持 IndexedDB 缓存', 'error')
+    return
+  }
+  await clearModelFileCache()
+  setStatus('本地模型缓存已清除', 'ready')
 }
 
 const sendMessage = async () => {
@@ -269,7 +401,7 @@ const showStats = () => {
   if (model) window.console.log('Conversation JSON:', model.get_conversation_json())
 }
 
-const onInputKeydown = (event) => {
+const onInputKeydown = (event: KeyboardEvent) => {
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     void sendMessage()
@@ -277,6 +409,7 @@ const onInputKeydown = (event) => {
 }
 
 onMounted(() => {
+  readSavedSettings()
   void loadModel()
 })
 </script>
@@ -286,6 +419,31 @@ onMounted(() => {
     <el-card class="header-card" shadow="never">
       <h2>Qwen3 Chat</h2>
       <p>基于 Candle + WebAssembly，在浏览器中运行量化 Qwen3 模型。</p>
+      <div class="path-config">
+        <el-input v-model="modelPaths.model" placeholder="模型文件地址" :disabled="isGenerating">
+          <template #prepend>Model</template>
+        </el-input>
+        <el-input v-model="modelPaths.tokenizer" placeholder="Tokenizer 文件地址" :disabled="isGenerating">
+          <template #prepend>Tokenizer</template>
+        </el-input>
+        <el-input v-model="modelPaths.config" placeholder="Config 文件地址" :disabled="isGenerating">
+          <template #prepend>Config</template>
+        </el-input>
+        <div class="path-actions">
+          <el-switch
+            v-model="cacheEnabled"
+            :disabled="!cacheSupported || isGenerating"
+            inline-prompt
+            active-text="缓存开"
+            inactive-text="缓存关"
+          />
+          <span class="cache-mode">{{ cacheModeText }}</span>
+          <el-button :disabled="isGenerating" @click="clearLocalCache">清除缓存</el-button>
+          <el-button type="primary" :disabled="isGenerating" @click="applyModelSettings">
+            应用路径并重载
+          </el-button>
+        </div>
+      </div>
     </el-card>
 
     <el-card class="panel-card" shadow="never">
@@ -294,6 +452,7 @@ onMounted(() => {
           <el-tag :type="statusTagType">{{ statusText }}</el-tag>
           <span class="cache-info">{{ cacheInfo }}</span>
         </div>
+        <div v-if="modelSourceText" class="source-info">{{ modelSourceText }}</div>
       </template>
 
       <div ref="chatThreadRef" class="chat-thread">
@@ -363,6 +522,25 @@ onMounted(() => {
   color: var(--el-text-color-secondary);
 }
 
+.path-config {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.path-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cache-mode {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
 .panel-card {
   flex: 1;
   display: flex;
@@ -385,6 +563,13 @@ onMounted(() => {
 .cache-info {
   font-size: 12px;
   color: var(--el-text-color-secondary);
+  font-family: 'Courier New', monospace;
+}
+
+.source-info {
+  margin-top: 8px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
   font-family: 'Courier New', monospace;
 }
 

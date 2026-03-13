@@ -11,14 +11,14 @@ default = []
 #simd-flash-attn = ["candle-nn/simd-flash-attn", "candle-transformers/simd-flash-attn"]
 
 [dependencies]
-candle-core = { workspace = true }
+candle = { workspace = true }
 candle-nn = { workspace = true }
 candle-transformers = { workspace = true} #, features = ["simd-flash-attn"] }
 tokenizers = { workspace = true, features = ["unstable_wasm"] }
 num-traits = { workspace = true }
 
 # Shared chat template support
-wasm-chat-template = { path = "../chat-template", version = "0.1.0" }
+candle_wasm_chat_template = { path = "../chat-template", package = "wasm-chat-template", version = "0.1.0" }
 
 # App crates.
 anyhow = { workspace = true }

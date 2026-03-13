@@ -2,10 +2,33 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { House, DataAnalysis } from '@element-plus/icons-vue'
+import { routes } from '../router'
 
 const route = useRoute()
 
-const activeMenu = computed(() => route.path)
+const menuItems = computed(() => {
+  const rootRoute = routes.find((item) => item.path === '/')
+  const children = rootRoute?.children ?? []
+  return children.map((item) => {
+    const rawPath = typeof item.path === 'string' ? item.path : ''
+    const path = rawPath.startsWith('/') ? rawPath : `/${rawPath}`.replace('//', '/')
+    const title = typeof item.meta?.title === 'string' ? item.meta.title : String(item.name ?? path)
+    const iconName = typeof item.meta?.icon === 'string' ? item.meta.icon : 'House'
+    const icon = iconName === 'DataAnalysis' ? DataAnalysis : House
+    return {
+      path: path === '/' ? '/' : path.replace(/\/+$/, ''),
+      title,
+      icon,
+    }
+  })
+})
+
+const activeMenu = computed(() => {
+  const matched = menuItems.value.find(
+    (item) => route.path === item.path || route.path.startsWith(`${item.path}/`),
+  )
+  return matched?.path ?? route.path
+})
 </script>
 
 <template>
@@ -13,13 +36,9 @@ const activeMenu = computed(() => route.path)
     <el-aside width="220px" class="app-aside">
       <div class="logo">Candle Demo</div>
       <el-menu :default-active="activeMenu" router>
-        <el-menu-item index="/">
-          <el-icon><House /></el-icon>
-          <span>首页</span>
-        </el-menu-item>
-        <el-menu-item index="/dashboard">
-          <el-icon><DataAnalysis /></el-icon>
-          <span>控制台</span>
+        <el-menu-item v-for="item in menuItems" :key="item.path" :index="item.path">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span>{{ item.title }}</span>
         </el-menu-item>
       </el-menu>
     </el-aside>

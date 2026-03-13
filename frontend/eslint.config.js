@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 
 export default [
-  { ignores: ['src/wasm-pkg/**'] },
+  { ignores: ['dist/**', 'src/wasm-pkg/**'] },
   { files: ['**/*.{js,mjs,cjs,ts,vue}'] },
   { languageOptions: { globals: globals.browser } },
   js.configs.recommended,

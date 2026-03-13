@@ -6,37 +6,31 @@ const message = ref('')
 
 <template>
   <div class="container">
-    <div class="card">
+    <el-card class="card">
       <h1>Candle + WASM Demo</h1>
       <p v-if="message">{{ message }}</p>
       <p v-else>Loading WASM...</p>
-    </div>
+    </el-card>
   </div>
 </template>
 
 <style scoped>
 .container {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 100vh;
+  justify-content: flex-start;
+  align-items: flex-start;
   font-family: Arial, sans-serif;
 }
 
 .card {
-  padding: 2em;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-  text-align: center;
-  background: #f9f9f9;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  max-width: 400px;
-  width: 100%;
+  width: min(560px, 100%);
 }
 
 h1 {
   color: #333;
-  margin-bottom: 1em;
+  margin: 0 0 1em;
+  font-size: 28px;
+  line-height: 1.2;
 }
 
 p {

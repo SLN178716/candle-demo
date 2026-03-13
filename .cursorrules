@@ -2,7 +2,7 @@
 
 ## Tech Stack
 -   **Backend (WASM)**: Rust, Candle (ML framework), wasm-bindgen.
--   **Frontend**: Vue 3, TypeScript, Vite.
+-   **Frontend**: Vue 3, TypeScript, Vite, vue-router（History 模式）。
 -   **Package Manager**: pnpm.
 -   **Node Version**: 22.4.1 (managed by nvm).
 -   **Linting/Formatting**: ESLint, Prettier.
@@ -10,15 +10,19 @@
 ## Directory Structure
 -   `/wasm`: Rust project for WASM modules.
 -   `/frontend`: Vue 3 frontend application.
+-   `/frontend/src/views`: 页面级组件目录。
+-   `/frontend/src/router/index.ts`: 前端路由统一配置入口。
 
 ## Development Workflow
 1.  **WASM Changes**: When modifying Rust code in `/wasm`, always run the `build-wasm` skill or `wasm-pack build --target web --out-dir ../frontend/src/wasm-pkg`.
 2.  **Frontend Changes**: Frontend code resides in `/frontend`. Use `pnpm dev` to start the server.
-3.  **Dependencies**: Use `pnpm install` in `/frontend`.
+3.  **Routing Changes**: Maintain routes in `/frontend/src/router/index.ts` with `createWebHistory(import.meta.env.BASE_URL)`.
+4.  **Dependencies**: Use `pnpm install` in `/frontend`.
 
 ## Coding Standards
 -   **Rust**: Follow Rust idioms. Use `Result` for error handling. Ensure functions exposed to WASM are marked with `#[wasm_bindgen]`.
 -   **Vue/TS**: Use `<script setup lang="ts">`. Adhere to ESLint and Prettier configurations.
+-   **Vue Router**: `App.vue` only acts as router entry and renders `<RouterView />`; page logic belongs in `src/views`.
 -   **Node**: Ensure `.nvmrc` is respected (use `nvm use`).
 
 ## Candle Specifics

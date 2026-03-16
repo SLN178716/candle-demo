@@ -240,7 +240,7 @@ const addAssistantMessage = (): ChatMessage => {
 }
 
 const loadWasmModule = async (): Promise<WasmModule> => {
-  const candidates = ['/src/wasm-pkg/qwen3/wasm_qwen3.js', '/wasm-pkg/qwen3/wasm_qwen3.js']
+  const candidates = ['/src/wasm-pkg/qwen3/candle_wasm_example_quant_qwen3.js', '/wasm-pkg/qwen3/candle_wasm_example_quant_qwen3.js']
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {

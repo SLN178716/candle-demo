@@ -1,0 +1,28 @@
+{
+  "name": "candle-wasm-example-quant-qwen3",
+  "type": "module",
+  "description": "Minimalist ML framework.",
+  "version": "0.9.2",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/huggingface/candle"
+  },
+  "files": [
+    "candle_wasm_example_quant_qwen3_bg.wasm",
+    "candle_wasm_example_quant_qwen3.js",
+    "candle_wasm_example_quant_qwen3_bg.js",
+    "candle_wasm_example_quant_qwen3.d.ts"
+  ],
+  "main": "candle_wasm_example_quant_qwen3.js",
+  "types": "candle_wasm_example_quant_qwen3.d.ts",
+  "sideEffects": [
+    "./candle_wasm_example_quant_qwen3.js",
+    "./snippets/*"
+  ],
+  "keywords": [
+    "blas",
+    "tensor",
+    "machine-learning"
+  ]
+}

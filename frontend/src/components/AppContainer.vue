@@ -48,14 +48,19 @@ const activeMenu = computed(() => {
   </el-container>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
+// SCSS 变量定义
+$border-color: var(--el-border-color);
+$bg-color-page: var(--el-bg-color-page);
+
 .app-container {
-  min-height: 100vh;
+  height: 100vh;
 }
 
 .app-aside {
-  border-right: 1px solid var(--el-border-color);
-  background-color: var(--el-bg-color-page);
+  height: 100%;
+  border-right: 1px solid $border-color;
+  background-color: $bg-color-page;
 }
 
 .logo {
@@ -65,11 +70,11 @@ const activeMenu = computed(() => {
   padding: 0 20px;
   font-size: 18px;
   font-weight: 600;
-  border-bottom: 1px solid var(--el-border-color);
+  border-bottom: 1px solid $border-color;
 }
 
 .app-main {
-  background-color: var(--el-bg-color-page);
-  padding: 20px;
+  height: 100%;
+  background-color: $bg-color-page;
 }
 </style>

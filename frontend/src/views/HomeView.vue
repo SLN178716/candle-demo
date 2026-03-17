@@ -14,27 +14,33 @@ const message = ref('')
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
+// SCSS 变量定义
+$min-card-width: 560px;
+$font-family: Arial, sans-serif;
+$primary-color: #333;
+$secondary-color: #666;
+
 .container {
   display: flex;
   justify-content: flex-start;
   align-items: flex-start;
-  font-family: Arial, sans-serif;
+  font-family: $font-family;
 }
 
 .card {
-  width: min(560px, 100%);
+  width: min($min-card-width, 100%);
 }
 
 h1 {
-  color: #333;
+  color: $primary-color;
   margin: 0 0 1em;
   font-size: 28px;
   line-height: 1.2;
 }
 
 p {
-  color: #666;
+  color: $secondary-color;
   font-size: 1.2em;
 }
 </style>

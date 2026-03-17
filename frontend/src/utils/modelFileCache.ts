@@ -10,7 +10,7 @@ type CacheRecord = {
 }
 
 type LoadResult = {
-  buffer: ArrayBuffer
+  buffer: ArrayBufferLike
   fromCache: boolean
 }
 
@@ -79,7 +79,7 @@ export const readModelFileCache = async (key: string): Promise<CacheRecord | nul
 
 export const writeModelFileCache = async (
   key: string,
-  buffer: ArrayBuffer,
+  buffer: ArrayBufferLike,
 ): Promise<boolean | null> => {
   return runTransaction<boolean>('readwrite', (store, resolve, reject) => {
     const request = store.put({
@@ -105,6 +105,7 @@ export const loadModelArrayBuffer = async (
   url: string,
   cacheKey: string,
   useCache: boolean,
+  onProgress?: (receivedSize: number, totalSize: number) => void,
 ): Promise<LoadResult> => {
   if (useCache) {
     const cached = await readModelFileCache(cacheKey)
@@ -117,18 +118,44 @@ export const loadModelArrayBuffer = async (
   }
 
   const response = await fetch(url)
+  const totalSize = Number(response.headers.get('content-length') || '0')
+
   if (!response.ok) {
     throw new Error(`文件加载失败: ${url}`)
   }
 
-  const buffer = await response.arrayBuffer()
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error(`文件加载失败: ${url}`)
+  }
 
+  let receivedSize = 0
+  const chunks: Uint8Array[] = []
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(value)
+    receivedSize += value.length
+    if (totalSize > 0) {
+      onProgress?.(receivedSize, totalSize)
+    }
+  }
+
+  let offset = 0
+  const buffer = chunks.reduce((acc, chunk) => {
+    acc.set(chunk, offset)
+    offset += chunk.length
+    return acc
+  }, new Uint8Array(receivedSize))
+
+  const arrayBuffer = buffer.buffer
   if (useCache) {
-    await writeModelFileCache(cacheKey, buffer)
+    await writeModelFileCache(cacheKey, arrayBuffer)
   }
 
   return {
-    buffer,
+    buffer: arrayBuffer,
     fromCache: false,
   }
 }

@@ -8,7 +8,10 @@
   </div>
 </template>
 
-<style scoped>
+<style lang="scss" scoped>
+// SCSS 变量定义
+$min-card-width: 560px;
+
 .not-found {
   min-height: 100vh;
   display: flex;
@@ -18,6 +21,6 @@
 }
 
 .card {
-  width: min(560px, 100%);
+  width: min($min-card-width, 100%);
 }
 </style>

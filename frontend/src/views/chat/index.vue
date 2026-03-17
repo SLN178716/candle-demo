@@ -1,38 +1,27 @@
 <template>
-  <div
-    class="chat-view"
-    v-loading="wasmLoadStatus === WASM_LOAD_STATUS.LOADING"
-    element-loading-text="页面加载中..."
-  >
+  <div class="chat-view" v-loading="wasmLoadStatus === WASM_LOAD_STATUS.LOADING" element-loading-text="页面加载中...">
     <div class="chat-content">
       <el-empty description="WASM 模块加载失败！" v-if="wasmLoadStatus === WASM_LOAD_STATUS.FAIL" />
       <template v-else-if="wasmLoadStatus === WASM_LOAD_STATUS.LOADED">
-        <el-result
-          v-if="modelLoadStatus !== MODEL_LOAD_STATUS.LOADED"
-          :title="
+        <el-result v-if="modelLoadStatus !== MODEL_LOAD_STATUS.LOADED" :title="
             {
               [MODEL_LOAD_STATUS.EMPTY]: '请选择模型',
               [MODEL_LOAD_STATUS.DOWNLOADING]: '模型下载中',
               [MODEL_LOAD_STATUS.MODEL_LOADING]: '模型初始化中',
               [MODEL_LOAD_STATUS.FAIL]: '模型加载失败',
             }[modelLoadStatus]
-          "
-          :icon="modelLoadStatus === MODEL_LOAD_STATUS.FAIL ? 'error' : 'primary'"
-        >
-          <template
-            v-if="
+          " :icon="modelLoadStatus === MODEL_LOAD_STATUS.FAIL ? 'error' : 'primary'">
+          <template v-if="
               modelLoadStatus === MODEL_LOAD_STATUS.DOWNLOADING ||
               modelLoadStatus === MODEL_LOAD_STATUS.MODEL_LOADING
-            "
-            #icon
-          >
+            " #icon>
             <el-progress type="dashboard" :percentage="modelLoadPercentage" />
           </template>
         </el-result>
-        <el-card v-else>
+        <el-card class="chat-card" v-else>
           <template #header>
             <div class="header">
-              <h2>{{ activeModelInfo?.label }}</h2>
+              <h3>{{ activeModelInfo?.label }}</h3>
               <div class="running-info">
                 <div class="info-item-container">
                   <span class="info-item">总令牌数: {{ cacheInfo.tokenCount }}</span>
@@ -45,60 +34,76 @@
               </div>
             </div>
           </template>
+
+          <!-- 聊天消息区域 -->
+          <div ref="chatThreadRef" class="chat-thread">
+            <!-- 空状态提示 -->
+            <div v-if="messages.length === 0" class="empty-state">
+              <h3>开始对话</h3>
+              <p>输入问题后点击发送，模型会逐 token 生成回复。</p>
+            </div>
+
+            <!-- 消息列表 -->
+            <div v-for="message in messages" :key="message.id" class="message" :class="message.role">
+              <!-- 助手消息的思考过程 -->
+              <template v-if="message.role === 'assistant' && message.thinking">
+                <el-button text type="primary" class="thinking-toggle"
+                           @click="message.thinkingCollapsed = !message.thinkingCollapsed">
+                  {{ message.thinkingCollapsed ? '展开推理过程' : '收起推理过程' }}
+                </el-button>
+                <pre v-show="!message.thinkingCollapsed" class="thinking-content">{{ message.thinking }}</pre>
+              </template>
+
+              <!-- 消息内容 -->
+              <pre class="message-content">{{ message.content }}</pre>
+              <!-- 流式生成指示器 -->
+              <span v-if="message.streaming" class="streaming-dot"></span>
+            </div>
+          </div>
+
+          <!-- 输入区域 -->
+          <div class="input-area">
+            <!-- 消息输入框 -->
+            <el-input v-model="userInput" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 6 }"
+                      :disabled="isGenerating" placeholder="输入消息，Enter发送，Shift+Enter换行" />
+
+            <!-- 按钮操作行 -->
+            <div class="button-row">
+              <el-button type="primary" :disabled="!canSend">发送</el-button>
+              <el-button type="danger" :disabled="!isGenerating">停止</el-button>
+              <el-button :disabled="isGenerating">新会话</el-button>
+              <el-button :disabled="isGenerating">统计</el-button>
+            </div>
+          </div>
         </el-card>
       </template>
     </div>
     <div class="chat-option">
-      <el-card header="模型配置">
+      <el-card class="chat-option-card" header="模型配置">
         <el-form :model="option" ref="optionRef" label-position="top">
           <el-form-item label="模型" prop="activeModel">
             <el-select v-model="option.activeModel" placeholder="请选择模型">
-              <el-option
-                v-for="item in modelList"
-                :key="item.value"
-                :label="item.label"
-                :value="item.value"
-              ></el-option>
+              <el-option v-for="item in modelList" :key="item.value" :label="item.label"
+                         :value="item.value"></el-option>
             </el-select>
           </el-form-item>
           <el-form-item label="模型缓存" prop="cacheEnabled">
-            <el-switch
-              v-if="cacheSupported"
-              v-model="option.cacheEnabled"
-              inline-prompt
-              active-text="启用"
-              inactive-text="禁用"
-            />
+            <el-switch v-if="cacheSupported" v-model="option.cacheEnabled" inline-prompt active-text="启用"
+                       inactive-text="禁用" />
             <span v-else class="cache-mode">当前浏览器不支持本地缓存</span>
           </el-form-item>
           <el-form-item label="思考模式" prop="enableThinking">
-            <el-switch
-              v-model="option.enableThinking"
-              inline-prompt
-              active-text="启用"
-              inactive-text="禁用"
-            />
+            <el-switch v-model="option.enableThinking" inline-prompt active-text="启用" inactive-text="禁用" />
           </el-form-item>
           <el-form-item>
-            <el-button
-              v-if="cacheSupported"
-              :disabled="
+            <el-button v-if="cacheSupported" :disabled="
                 modelLoadStatus === MODEL_LOAD_STATUS.DOWNLOADING ||
                 modelLoadStatus === MODEL_LOAD_STATUS.MODEL_LOADING
-              "
-              @click="clearLocalCache"
-              >清除缓存</el-button
-            >
-            <el-button
-              :disabled="wasmLoadStatus !== WASM_LOAD_STATUS.LOADED"
-              :loading="
+              " @click="clearLocalCache">清除缓存</el-button>
+            <el-button :disabled="wasmLoadStatus !== WASM_LOAD_STATUS.LOADED" :loading="
                 modelLoadStatus === MODEL_LOAD_STATUS.DOWNLOADING ||
                 modelLoadStatus === MODEL_LOAD_STATUS.MODEL_LOADING
-              "
-              type="primary"
-              @click="applyModelSettings"
-              >应用模型</el-button
-            >
+              " type="primary" @click="applyModelSettings">应用模型</el-button>
           </el-form-item>
         </el-form>
       </el-card>
@@ -221,6 +226,21 @@ const loadModel = (modelPath: string, tokenizerPath: string, configPath: string)
     });
 };
 
+// 聊天消息数据结构
+type ChatMessage = {
+  id: number;
+  role: 'user' | 'assistant';
+  content: string;
+  thinking: string;
+  thinkingCollapsed: boolean;
+  streaming: boolean;
+};
+const messages = ref<ChatMessage[]>([]); // 聊天消息列表
+const userInput = ref(''); // 用户输入内容
+const isGenerating = ref(false); // 是否正在生成回复
+// 计算属性：是否可以发送消息
+const canSend = computed(() => !isGenerating.value && userInput.value.trim().length > 0);
+
 const wasmLoadStatus: Ref<(typeof WASM_LOAD_STATUS)[keyof typeof WASM_LOAD_STATUS]> = ref(
   WASM_LOAD_STATUS.LOADING,
 );
@@ -266,6 +286,12 @@ onBeforeUnmount(() => {
 </script>
 
 <style lang="scss" scoped>
+// SCSS 变量定义
+$primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+$thinking-bg: #e8ecff;
+$streaming-dot-color: #667eea;
+$secondary-text-color: var(--el-text-color-secondary);
+$fill-light: var(--el-fill-color-light);
 $border-color: var(--el-border-color);
 
 .chat-view {
@@ -281,33 +307,154 @@ $border-color: var(--el-border-color);
     justify-content: center;
     background: #ffffff;
 
-    .header {
+    .chat-card {
       width: 100%;
-      display: flex;
-      flex-direction: row;
-      justify-content: space-between;
-      align-items: center;
+      height: 100%;
 
-      .running-info {
-        color: #666666;
-        font-size: smaller;
+      .header {
+        width: 100%;
         display: flex;
-        flex-direction: column;
-        justify-content: center;
-        align-items: flex-start;
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
 
-        .info-item-container {
-          padding: 5px 0;
+        .running-info {
+          color: #666666;
+          font-size: smaller;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: flex-start;
 
-          .info-item {
-            padding: 5px 10px;
-            border-radius: 5px;
-            background-color: #f5f5f5;
-            margin-right: 5px;
+          .info-item-container {
+            padding: 5px 0;
+            margin-bottom: 5px;
+
+            .info-item {
+              padding: 5px 10px;
+              border-radius: 5px;
+              background-color: #f5f5f5;
+              margin-right: 5px;
+
+              &:last-child {
+                margin-right: 0;
+              }
+            }
 
             &:last-child {
-              margin-right: 0;
+              margin-bottom: 0;
             }
+          }
+        }
+      }
+
+      // 聊天线程区域
+      .chat-thread {
+        height: calc(100% - 130px);
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        padding: 6px 0;
+
+        .empty-state {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          align-items: center;
+          color: $secondary-text-color;
+        }
+
+        // 消息样式
+        .message {
+          max-width: 85%;
+          border-radius: 12px;
+          padding: 12px;
+
+          &.user {
+            align-self: flex-end;
+            color: #fff;
+            background: $primary-gradient;
+          }
+
+          &.assistant {
+            align-self: flex-start;
+            background: $fill-light;
+          }
+
+          .message-content {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.5;
+            font-family: inherit;
+          }
+
+          .thinking-toggle {
+            margin-bottom: 6px;
+            padding: 0;
+          }
+
+          .thinking-content {
+            margin: 0 0 8px;
+            border-radius: 8px;
+            padding: 10px;
+            background: $thinking-bg;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 220px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+          }
+
+          .streaming-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            margin-left: 8px;
+            border-radius: 50%;
+            background: $streaming-dot-color;
+            animation: pulse 1s infinite;
+          }
+        }
+      }
+
+      // 输入区域
+      .input-area {
+        margin-top: 8px;
+        padding-top: 12px;
+        border-top: 1px solid $border-color;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+
+        .options-row {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+
+          .max-tokens {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+          }
+        }
+
+        .button-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+
+          .memory-info {
+            margin-left: auto;
+            font-size: 12px;
+            color: $secondary-text-color;
+            font-family: 'Courier New', monospace;
           }
         }
       }
@@ -317,7 +464,22 @@ $border-color: var(--el-border-color);
   .chat-option {
     height: 100%;
     width: 300px;
-    border-left: 1px solid $border-color;
+    margin-left: 20px;
+
+    .chat-option-card {
+      height: 100%;
+    }
+  }
+}
+
+// 动画定义
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
   }
 }
 </style>

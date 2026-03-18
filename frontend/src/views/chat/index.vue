@@ -35,9 +35,9 @@
               <h3>{{ activeModelInfo?.label }}</h3>
               <div class="running-info">
                 <div class="info-item-container">
-                  <span class="info-item">总令牌数: {{ cacheInfo.tokenCount }}</span>
+                  <span class="info-item">总Token数: {{ cacheInfo.tokenCount }}</span>
                   <span class="info-item">缓存消息数: {{ cacheInfo.messageCount }}</span>
-                  <span class="info-item">缓存令牌数: {{ cacheInfo.cachedTokenCount }}</span>
+                  <span class="info-item">缓存Token数: {{ cacheInfo.cachedTokenCount }}</span>
                 </div>
                 <div class="info-item-container">
                   <span class="info-item">{{ memoryInfo.wasmMemoryInfo }}</span>
